@@ -276,14 +276,8 @@
       <span class="inline-block bg-emerald-100 text-emerald-800 text-[11px] font-bold uppercase tracking-widest px-3 py-1 rounded-full"><span id="reward-badge">Passport Complete</span></span>
       <h3 class="font-display text-2xl font-bold text-passport-navy mt-2">Master Traveler!</h3>
       <p class="text-xs text-slate-600 mt-1 leading-relaxed">
-        Congratulations, <strong id="reward-holder-name">Diplomat</strong>! Thank you for joining the LAPA Embassy Circuit! 
-.
+        Congratulations, <strong id="reward-holder-name">Diplomat</strong>! Thank you for joining the LAPA Embassy Circuit!
       </p>
-      <div class="mt-4 bg-white border-2 border-dashed border-passport-navy/30 rounded-2xl p-4">
-        <span class="block text-[10px] font-mono uppercase tracking-widest text-slate-400">Redemption Code</span>
-        <div id="redemption-code" class="font-mono text-2xl font-bold text-passport-navy tracking-wider mt-1 select-all">GOLD-8842</div>
-        <span id="reward-timestamp" class="block text-[10px] font-mono text-emerald-700 mt-1">Verified • All Stations Visited</span>
-      </div>
       <button onclick="closeRewardModal()" class="mt-5 w-full py-3 rounded-2xl bg-passport-navy hover:bg-passport-royal text-white font-display font-semibold text-sm shadow transition">Back to My Passport</button>
     </div>
   </div>
@@ -317,7 +311,6 @@
     // ORGANIZERS: only these Google accounts can see the Organizer QRs tab.
     // Replace with your real email(s), in lowercase.
     const ORGANIZER_EMAILS = [
-      'your-email@gmail.com'
       'za248@georgetown.edu'
     ];
     function isOrganizer() {
@@ -723,7 +716,6 @@
 
     function openRewardModal() {
       document.getElementById('reward-holder-name').textContent = passportState.holderName || 'Diplomat';
-      document.getElementById('redemption-code').textContent = passportState.rewardCode;
       document.getElementById('reward-badge').textContent = `Passport Complete • ${STATIONS.length}/${STATIONS.length} Stamps`;
       document.getElementById('modal-reward').classList.remove('hidden');
     }
