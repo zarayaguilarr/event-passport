@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LAPA Stamp Passport</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  <!-- Firebase (Google login + saved passports) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=Fredoka:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            display: ['Fredoka', 'sans-serif'],
+            mono: ['Courier Prime', 'monospace'],
+          },
+          colors: {
+            passport: {
+              navy: '#1E2A4A',
+              royal: '#273966',
+              gold: '#F5C451',
+              cream: '#FAF6EE',
+              paper: '#F3ECE0',
+              ink: '#2C2A29',
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <style>
+    .paper-texture {
+      background-color: #FAF6EE;
+      background-image:
+        radial-gradient(rgba(30, 42, 74, 0.045) 1px, transparent 0),
+        radial-gradient(rgba(180, 145, 95, 0.05) 1px, transparent 0);
+      background-size: 20px 20px;
+      background-position: 0 0, 10px 10px;
+    }
+    .cover-texture {
+      background: linear-gradient(145deg, #24345C 0%, #192440 100%);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 10px 25px -5px rgba(17, 24, 39, 0.25);
+    }
+    .gold-foil {
+      color: #F5C451;
+      text-shadow: 0 1px 1px rgba(0, 0, 0, 0.45);
+    }
+    .stitched-border {
+      border: 1.5px dashed rgba(245, 196, 81, 0.45);
+    }
+    @keyframes stampPress {
+      0% { opacity: 0; transform: scale(2.1) rotate(0deg); }
+      55% { opacity: 1; transform: scale(0.92) rotate(var(--stamp-rot, -4deg)); }
+      75% { transform: scale(1.04) rotate(var(--stamp-rot, -4deg)); }
+      100% { opacity: 1; transform: scale(1) rotate(var(--stamp-rot, -4deg)); }
+    }
+    .animate-stamp-press {
+      animation: stampPress 0.55s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+    .ink-stamp {
+      filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.12));
+      transition: transform 0.2s ease;
+    }
+    .ink-stamp:active {
+      transform: scale(0.96) rotate(var(--stamp-rot, -4deg));
+    }
+    @media print {
+      body * { visibility: hidden; }
+      #qr-print-area, #qr-print-area * { visibility: visible; }
+      #qr-print-area { position: absolute; left: 0; top: 0; width: 100%; background: white !important; }
+      .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body class="bg-slate-200 text-passport-ink min-h-screen flex flex-col items-center justify-start sm:py-6 selection:bg-amber-200">
+
+  <div id="toast-container" class="fixed top-4 left-1/2 -translate-x-1/2 z-[60] w-[92%] max-w-md pointer-events-none flex flex-col gap-2"></div>
+
+  <!-- GOOGLE LOGIN SCREEN -->
+  <div id="login-overlay" class="fixed inset-0 z-50 bg-passport-navy flex items-center justify-center p-6">
+    <div class="bg-passport-cream w-full max-w-sm rounded-3xl p-7 text-center shadow-2xl border-4 border-passport-gold">
+      <div class="w-16 h-16 mx-auto rounded-full bg-passport-gold text-passport-navy flex items-center justify-center text-3xl font-display font-bold shadow mb-3">★</div>
+      <h1 class="font-display text-2xl font-bold text-passport-navy">LAPA Passport</h1>
+      <p class="text-xs text-slate-600 mt-1 mb-5">Sign in with Google to open your personal stamp passport.</p>
+      <button id="google-signin-btn" type="button" class="w-full py-3 rounded-2xl bg-white border border-slate-300 hover:bg-slate-50 font-semibold text-sm text-slate-800 shadow flex items-center justify-center gap-2.5">
+        <svg class="w-5 h-5" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.4c-.5 2.9-2.1 5.3-4.5 7l7.3 5.7c4.3-4 6.9-9.9 6.9-17.2z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.4-.8-2.9-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C.9 16.4 0 20.1 0 24s.9 7.6 2.6 10.8l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.3-5.7c-2 1.4-4.6 2.3-8.6 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
+        Continue with Google
+      </button>
+    </div>
+  </div>
+
+  <main class="w-full max-w-md bg-passport-cream sm:rounded-3xl shadow-2xl overflow-hidden border border-amber-900/15 flex flex-col min-h-screen sm:min-h-[820px]">
+
+    <nav class="bg-passport-navy text-white px-4 pt-3 pb-2 flex items-center justify-between border-b border-white/10 no-print">
+      <div class="flex items-center gap-2">
+        <span class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-passport-gold text-passport-navy font-display font-bold text-sm shadow">★</span>
+        <span class="font-display font-semibold tracking-wide text-sm text-amber-100">EVENT PASSPORT</span>
+      </div>
+      <div class="flex bg-black/25 p-1 rounded-xl text-xs font-semibold">
+        <button id="tab-passport" onclick="switchView('passport')" class="px-3 py-1.5 rounded-lg bg-passport-gold text-passport-navy shadow-sm transition">My Passport</button>
+        <button id="tab-organizer" onclick="switchView('organizer')" class="px-3 py-1.5 rounded-lg text-amber-100/80 hover:text-white transition">Organizer QRs</button>
+      </div>
+    </nav>
+
+    <!-- VIEW 1: ATTENDEE PASSPORT -->
+    <section id="view-passport" class="flex-1 flex flex-col">
+      <header class="cover-texture text-white p-5 relative">
+        <div class="stitched-border rounded-2xl p-4 relative overflow-hidden">
+          <svg class="w-28 h-28 text-passport-gold/10 absolute -right-4 -bottom-4 pointer-events-none" viewBox="0 0 100 100" fill="none" stroke="currentColor" stroke-width="3">
+            <circle cx="50" cy="50" r="42" />
+            <ellipse cx="50" cy="50" rx="20" ry="42" />
+            <line x1="8" y1="50" x2="92" y2="50" />
+            <line x1="16" y1="28" x2="84" y2="28" />
+            <line x1="16" y1="72" x2="84" y2="72" />
+          </svg>
+
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-[11px] uppercase tracking-[0.2em] text-amber-200/80 font-semibold">Official Explorer Document</p>
+              <h1 class="font-display text-2xl font-bold gold-foil tracking-wide mt-0.5">PASSPORT</h1>
+            </div>
+            <div class="text-right">
+              <span class="inline-block bg-black/30 border border-passport-gold/30 rounded-lg px-2.5 py-1 font-mono text-[11px] text-amber-200">
+                NO. <span id="passport-serial">EXP-2026</span>
+              </span>
+            </div>
+          </div>
+
+          <!-- Name comes from the Google account (read-only) -->
+          <div class="mt-4 pt-3 border-t border-white/10 flex items-center justify-between gap-2">
+            <div class="flex-1 min-w-0">
+              <label for="attendee-name-input" class="block text-[10px] uppercase tracking-wider text-amber-200/75 font-semibold">
+                Passport Holder
+              </label>
+              <input
+                id="attendee-name-input"
+                type="text"
+                readonly
+                placeholder="Explorer Name"
+                class="w-full bg-transparent font-mono text-base sm:text-lg font-bold text-white placeholder-white/40 focus:outline-none rounded px-1.5 -ml-1.5 py-0.5 truncate"
+              />
+            </div>
+            <div class="text-right shrink-0">
+              <span class="block text-[10px] uppercase tracking-wider text-amber-200/75 font-semibold">Issued</span>
+              <span id="issued-date" class="font-mono text-xs text-amber-100">TODAY</span>
+            </div>
+          </div>
+
+          <div class="mt-4 bg-black/25 rounded-xl p-3 border border-white/10">
+            <div class="flex items-center justify-between text-xs font-semibold mb-1.5">
+              <span class="text-amber-100">Stamp Progress</span>
+              <span id="progress-label" class="font-mono text-passport-gold font-bold">0 of 6 stamps collected</span>
+            </div>
+            <div class="w-full h-2.5 bg-black/40 rounded-full overflow-hidden p-0.5">
+              <div id="progress-bar" class="h-full bg-gradient-to-r from-amber-400 to-passport-gold rounded-full transition-all duration-500" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <div class="paper-texture flex-1 p-5 flex flex-col justify-between relative">
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-mono uppercase tracking-widest text-amber-900/60 font-bold">Page 01 • Visas &amp; Stamps</span>
+          </div>
+          <button onclick="openRewardModal()" id="view-reward-pill" class="hidden text-xs font-display font-semibold bg-emerald-600 text-white px-3 py-1 rounded-full shadow hover:bg-emerald-700 transition animate-bounce">
+            🏆 View Reward!
+          </button>
+        </div>
+
+        <div id="stamps-grid" class="grid grid-cols-2 gap-3.5 my-auto"></div>
+
+        <div class="mt-6 pt-4 border-t border-amber-900/15 flex flex-col gap-2.5">
+          <button
+            onclick="openCheckinModal()"
+            class="w-full py-3.5 px-4 rounded-2xl bg-passport-navy hover:bg-passport-royal active:scale-[0.99] text-white font-display font-semibold text-base shadow-lg shadow-passport-navy/20 flex items-center justify-center gap-2.5 transition"
+          >
+            <svg class="w-5 h-5 text-passport-gold" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 7V5a2 2 0 012-2h2m10 0h2a2 2 0 012 2v2m0 10v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2M7 12h10" />
+            </svg>
+            <span>Scan / Enter Station Code</span>
+          </button>
+
+          <div class="flex items-center justify-between text-xs text-amber-950/60 px-1">
+            <span>Tip: Scan booth QR codes with your camera</span>
+            <span class="flex items-center gap-3">
+              <button onclick="auth.signOut()" class="text-slate-600 hover:text-slate-900 font-semibold underline underline-offset-2 py-1">Sign out</button>
+              <button onclick="openResetConfirm()" class="text-rose-700 hover:text-rose-900 font-semibold underline underline-offset-2 py-1">Reset Passport</button>
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VIEW 2: ORGANIZER -->
+    <section id="view-organizer" class="hidden flex-1 flex-col paper-texture p-5">
+      <div class="flex items-start justify-between gap-2 mb-4">
+        <div>
+          <span class="inline-block text-[10px] font-mono uppercase tracking-widest bg-amber-900/10 text-amber-900 px-2 py-0.5 rounded font-bold">Event Host Toolkit</span>
+          <h2 class="font-display text-xl font-bold text-passport-navy mt-1">Station QR Codes &amp; PINs</h2>
+          <p class="text-xs text-slate-600 mt-0.5">
+            Print these QR cards for each booth, or tap <strong>Simulate Scan</strong> to test instant check-in right now.
+          </p>
+        </div>
+        <button onclick="window.print()" class="shrink-0 bg-passport-navy text-white text-xs font-semibold px-3 py-2 rounded-xl shadow hover:bg-passport-royal transition flex items-center gap-1.5 no-print">
+          <svg class="w-4 h-4 text-passport-gold" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" />
+          </svg>
+          <span>Print QRs</span>
+        </button>
+      </div>
+
+      <div id="local-file-warning" class="hidden mb-4 p-3 rounded-xl bg-amber-100 border border-amber-300 text-amber-950 text-xs">
+        <strong>Note:</strong> You are viewing this file locally. Once hosted on <strong>GitHub Pages</strong>, these QR codes will automatically encode your live <code class="font-mono bg-white/70 px-1 rounded">https://...github.io</code> URL!
+      </div>
+
+      <div id="qr-print-area" class="space-y-3.5 overflow-y-auto pb-6"></div>
+    </section>
+
+  </main>
+
+  <!-- MODAL 1: CHECK-IN -->
+  <div id="modal-checkin" class="fixed inset-0 z-40 hidden bg-slate-950/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl border border-slate-200 animate-[fadeIn_0.2s_ease]">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h3 class="font-display text-xl font-bold text-passport-navy">Station Check-In</h3>
+          <p class="text-xs text-slate-500">Select a location and enter its 3-digit booth PIN</p>
+        </div>
+        <button onclick="closeCheckinModal()" class="w-9 h-9 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-600 font-bold">✕</button>
+      </div>
+
+      <form id="manual-checkin-form" onsubmit="handleManualCheckin(event)" class="space-y-4">
+        <div>
+          <label for="station-select" class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5">1. Choose Location</label>
+          <select id="station-select" class="w-full rounded-xl border border-slate-300 bg-slate-50 px-3.5 py-3 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-passport-navy"></select>
+        </div>
+
+        <div>
+          <label for="station-pin-input" class="block text-xs font-semibold uppercase tracking-wider text-slate-600 mb-1.5">2. Enter 3-Digit Station PIN</label>
+          <input
+            id="station-pin-input"
+            type="text"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            maxlength="3"
+            placeholder="e.g. 101"
+            required
+            class="w-full rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 text-center font-mono text-2xl font-bold tracking-[0.4em] text-passport-navy focus:outline-none focus:ring-2 focus:ring-passport-navy"
+          />
+          <p id="pin-hint-text" class="text-[11px] text-slate-500 mt-1.5 text-center">Find the 3-digit PIN posted on the sign at each station.</p>
+        </div>
+
+        <p id="checkin-error-msg" class="hidden text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2 text-center"></p>
+
+        <button type="submit" class="w-full py-3.5 rounded-2xl bg-passport-navy hover:bg-passport-royal text-white font-display font-semibold text-base shadow-md transition">Stamp My Passport!</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL 2: REWARD -->
+  <div id="modal-reward" class="fixed inset-0 z-40 hidden bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-passport-cream w-full max-w-sm rounded-3xl p-6 shadow-2xl border-4 border-passport-gold text-center relative overflow-hidden">
+      <div class="w-20 h-20 mx-auto rounded-full bg-gradient-to-br from-amber-300 via-passport-gold to-amber-500 flex items-center justify-center shadow-lg border-4 border-white mb-3">
+        <span class="text-4xl">🏆</span>
+      </div>
+      <span class="inline-block bg-emerald-100 text-emerald-800 text-[11px] font-bold uppercase tracking-widest px-3 py-1 rounded-full">Passport Complete • 6/6 Stamps</span>
+      <h3 class="font-display text-2xl font-bold text-passport-navy mt-2">Master Explorer!</h3>
+      <p class="text-xs text-slate-600 mt-1 leading-relaxed">
+        Congratulations, <strong id="reward-holder-name">Explorer</strong>! Show this official redemption code at the Prize Desk to claim your reward.
+      </p>
+      <div class="mt-4 bg-white border-2 border-dashed border-passport-navy/30 rounded-2xl p-4">
+        <span class="block text-[10px] font-mono uppercase tracking-widest text-slate-400">Redemption Code</span>
+        <div id="redemption-code" class="font-mono text-2xl font-bold text-passport-navy tracking-wider mt-1 select-all">GOLD-8842</div>
+        <span id="reward-timestamp" class="block text-[10px] font-mono text-emerald-700 mt-1">Verified • All Stations Visited</span>
+      </div>
+      <button onclick="closeRewardModal()" class="mt-5 w-full py-3 rounded-2xl bg-passport-navy hover:bg-passport-royal text-white font-display font-semibold text-sm shadow transition">Back to My Passport</button>
+    </div>
+  </div>
+
+  <!-- MODAL 3: RESET -->
+  <div id="modal-reset" class="fixed inset-0 z-40 hidden bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+    <div class="bg-white w-full max-w-xs rounded-3xl p-6 shadow-2xl text-center">
+      <div class="w-12 h-12 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3 text-xl font-bold">!</div>
+      <h3 class="font-display text-lg font-bold text-slate-900">Reset Passport?</h3>
+      <p class="text-xs text-slate-600 mt-1">This will clear all collected stamps and reset your progress back to 0 of 6.</p>
+      <div class="mt-5 grid grid-cols-2 gap-2.5">
+        <button onclick="closeResetConfirm()" class="py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs">Cancel</button>
+        <button onclick="confirmResetPassport()" class="py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white font-semibold text-xs shadow">Yes, Clear All</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /** 1. EVENT STATIONS CONFIGURATION */
+    const STATIONS = [
+      { id: 1, code: '101', name: 'Welcome Plaza',     subtitle: 'Main Entrance',     color: '#E11D48', rotation: -5, shape: 'circle',  icon: 'compass' },
+      { id: 2, code: '202', name: 'Maker Workshop',    subtitle: 'North Hall',        color: '#2563EB', rotation: 4,  shape: 'hexagon', icon: 'gear' },
+      { id: 3, code: '303', name: 'Botanical Terrace', subtitle: 'East Courtyard',    color: '#059669', rotation: -3, shape: 'oval',    icon: 'leaf' },
+      { id: 4, code: '404', name: 'Arcade Alley',      subtitle: 'Level 2 Mezzanine', color: '#7C3AED', rotation: 6,  shape: 'ticket',  icon: 'bolt' },
+      { id: 5, code: '505', name: 'Skyline Deck',      subtitle: 'West Overlook',     color: '#D97706', rotation: -4, shape: 'shield',  icon: 'star' },
+      { id: 6, code: '606', name: 'Grand Finale',      subtitle: 'Central Stage',     color: '#0D9488', rotation: 3,  shape: 'badge',   icon: 'crown' }
+    ];
+
+    // Application State
+    let passportState = {
+      holderName: 'Explorer',
+      email: '',
+      serial: 'EXP-' + Math.floor(1000 + Math.random() * 9000),
+      issuedDate: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      stamps: {},
+      rewardCode: 'VIP-' + Math.random().toString(36).substring(2, 6).toUpperCase() + '-' + Math.floor(10 + Math.random() * 89),
+      newlyStampedId: null
+    };
+
+    /** 2. FIREBASE: GOOGLE LOGIN + CLOUD SAVING */
+    firebase.initializeApp({
+      apiKey: "AIzaSyAv1OdwgFXNtZedF9drqyCRqxo8lQTIS_M",
+      authDomain: "lapa-passport.firebaseapp.com",
+      projectId: "lapa-passport",
+      storageBucket: "lapa-passport.firebasestorage.app",
+      messagingSenderId: "1080732199861",
+      appId: "1:1080732199861:web:7ce49245bf6445d6fc87fc"
+    });
+    const auth = firebase.auth();
+    const db = firebase.firestore();
+    let currentUser = null;
+
+    function userDoc() { return db.collection('passports').doc(currentUser.uid); }
+
+    async function loadState() {
+      try {
+        const snap = await userDoc().get();
+        if (snap.exists) {
+          const d = snap.data();
+          passportState = {
+            ...passportState,
+            serial: d.serial || passportState.serial,
+            issuedDate: d.issuedDate || passportState.issuedDate,
+            stamps: d.stamps || {},
+            rewardCode: d.rewardCode || passportState.rewardCode,
+            newlyStampedId: null
+          };
+        }
+        // Name always comes from the Google account
+        passportState.holderName = currentUser.displayName || currentUser.email || 'Explorer';
+        passportState.email = currentUser.email || '';
+        await saveState();
+      } catch (err) {
+        console.error('Could not load passport:', err);
+        showToast('Could not load your passport. Check your connection.', 'error');
+      }
+    }
+
+    function saveState() {
+      if (!currentUser) return Promise.resolve();
+      return userDoc().set({
+        holderName: passportState.holderName,
+        email: passportState.email,
+        serial: passportState.serial,
+        issuedDate: passportState.issuedDate,
+        stamps: passportState.stamps,
+        rewardCode: passportState.rewardCode,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }).catch(err => {
+        console.error('Could not save passport:', err);
+        showToast('Could not save. Check your connection.', 'error');
+      });
+    }
+
+    /** 3. URL QUERY PARAMETER AUTO CHECK-IN (?station=1&code=101) */
+    function processUrlCheckIn() {
+      const params = new URLSearchParams(window.location.search);
+      const stationParam = params.get('station');
+      const codeParam = params.get('code');
+      if (!stationParam) return;
+
+      const stationId = parseInt(stationParam, 10);
+      const station = STATIONS.find(s => s.id === stationId);
+
+      window.history.replaceState({}, document.title, window.location.pathname);
+
+      if (!station) { showToast('Invalid station QR code scanned.', 'error'); return; }
+      if (codeParam !== station.code) { showToast(`Invalid security PIN for ${station.name}.`, 'error'); return; }
+
+      unlockStation(station.id, true);
+    }
+
+    /** 4. CORE STAMP UNLOCK LOGIC */
+    function unlockStation(stationId, fromQr = false) {
+      const station = STATIONS.find(s => s.id === stationId);
+      if (!station) return false;
+
+      if (passportState.stamps[stationId]) {
+        showToast(`You already collected the ${station.name} stamp!`, 'info');
+        return true;
+      }
+
+      passportState.stamps[stationId] = { stampedAt: new Date().toISOString() };
+      passportState.newlyStampedId = stationId;
+      saveState();
+
+      switchView('passport');
+      renderPassport();
+
+      showToast(`Stamped: ${station.name}!`, 'success');
+      triggerMiniConfetti(station.color);
+
+      if (Object.keys(passportState.stamps).length === STATIONS.length) {
+        setTimeout(() => { triggerCompletionConfetti(); openRewardModal(); }, 850);
+      }
+      return true;
+    }
+
+    /** 5. SVG STAMP ARTWORK */
+    function getIconPath(iconName) {
+      switch (iconName) {
+        case 'compass':
+          return `<circle cx="50" cy="46" r="14" stroke-width="2.5"/><polygon points="50,36 54,46 50,56 46,46" fill="currentColor"/>`;
+        case 'gear':
+          return `<circle cx="50" cy="46" r="8" stroke-width="2.5"/><path d="M50 32v4M50 56v4M36 46h4M60 46h4M40 36l3 3M57 53l3 3M60 36l-3 3M43 53l-3 3" stroke-width="3" stroke-linecap="round"/>`;
+        case 'leaf':
+          return `<path d="M38 56C38 42 50 34 62 34C62 46 54 58 40 58" stroke-width="2.5" stroke-linecap="round"/><path d="M38 58L54 42" stroke-width="2.2" stroke-linecap="round"/>`;
+        case 'bolt':
+          return `<polygon points="52,32 40,48 49,48 46,60 60,44 51,44" fill="currentColor"/>`;
+        case 'star':
+          return `<polygon points="50,32 54,42 65,42 56,49 59,59 50,53 41,59 44,49 35,42 46,42" fill="currentColor"/>`;
+        case 'crown':
+          return `<path d="M36 55L39 39L46 46L50 36L54 46L61 39L64 55H36Z" fill="currentColor"/>`;
+        default:
+          return `<circle cx="50" cy="46" r="10" fill="currentColor"/>`;
+      }
+    }
+
+    function renderStampSVG(station, isUnlocked, timestampStr) {
+      const inkColor = isUnlocked ? station.color : '#94A3B8';
+      const dashAttr = isUnlocked ? '' : 'stroke-dasharray="4 3"';
+      const dateText = isUnlocked ? timestampStr : `STATION 0${station.id}`;
+
+      let frameSvg = '';
+      if (station.shape === 'hexagon') {
+        frameSvg = `
+          <polygon points="50,6 90,28 90,72 50,94 10,72 10,28" fill="none" stroke="${inkColor}" stroke-width="3" ${dashAttr}/>
+          <polygon points="50,12 84,31 84,69 50,88 16,69 16,31" fill="none" stroke="${inkColor}" stroke-width="1.2" ${dashAttr}/>`;
+      } else if (station.shape === 'oval') {
+        frameSvg = `
+          <ellipse cx="50" cy="50" rx="44" ry="36" fill="none" stroke="${inkColor}" stroke-width="3" ${dashAttr}/>
+          <ellipse cx="50" cy="50" rx="38" ry="30" fill="none" stroke="${inkColor}" stroke-width="1.2" ${dashAttr}/>`;
+      } else if (station.shape === 'ticket') {
+        frameSvg = `
+          <rect x="10" y="14" width="80" height="72" rx="14" fill="none" stroke="${inkColor}" stroke-width="3" ${dashAttr}/>
+          <rect x="16" y="20" width="68" height="60" rx="10" fill="none" stroke="${inkColor}" stroke-width="1.2" ${dashAttr}/>`;
+      } else if (station.shape === 'shield') {
+        frameSvg = `
+          <path d="M16 14 H84 V52 C84 72 50 90 50 90 C50 90 16 72 16 52 Z" fill="none" stroke="${inkColor}" stroke-width="3" ${dashAttr}/>
+          <path d="M22 20 H78 V50 C78 67 50 83 50 83 C50 83 22 67 22 50 Z" fill="none" stroke="${inkColor}" stroke-width="1.2" ${dashAttr}/>`;
+      } else if (station.shape === 'badge') {
+        frameSvg = `
+          <circle cx="50" cy="50" r="42" fill="none" stroke="${inkColor}" stroke-width="3.2" ${dashAttr}/>
+          <circle cx="50" cy="50" r="35" fill="none" stroke="${inkColor}" stroke-width="1.5" stroke-dasharray="2 2"/>`;
+      } else {
+        frameSvg = `
+          <circle cx="50" cy="50" r="42" fill="none" stroke="${inkColor}" stroke-width="3" ${dashAttr}/>
+          <circle cx="50" cy="50" r="36" fill="none" stroke="${inkColor}" stroke-width="1.2" ${dashAttr}/>`;
+      }
+
+      return `
+        <svg viewBox="0 0 100 100" class="w-24 h-24 mx-auto overflow-visible" style="color: ${inkColor}">
+          ${frameSvg}
+          <g fill="none" stroke="currentColor" opacity="${isUnlocked ? '0.95' : '0.45'}">
+            ${getIconPath(station.icon)}
+          </g>
+          <rect x="18" y="65" width="64" height="14" rx="4" fill="${isUnlocked ? inkColor : 'transparent'}" opacity="${isUnlocked ? '0.14' : '1'}" />
+          <text x="50" y="74.5" text-anchor="middle" font-family="Courier Prime, monospace" font-weight="700" font-size="7.5" fill="${inkColor}" letter-spacing="0.5">
+            ${dateText}
+          </text>
+        </svg>`;
+    }
+
+    /** 6. RENDER PASSPORT VIEW */
+    function renderPassport() {
+      document.getElementById('attendee-name-input').value = passportState.holderName;
+      document.getElementById('passport-serial').textContent = passportState.serial;
+      document.getElementById('issued-date').textContent = passportState.issuedDate;
+
+      const collectedCount = Object.keys(passportState.stamps).length;
+      const totalCount = STATIONS.length;
+      const pct = Math.round((collectedCount / totalCount) * 100);
+
+      document.getElementById('progress-label').textContent = `${collectedCount} of ${totalCount} stamps collected`;
+      document.getElementById('progress-bar').style.width = `${pct}%`;
+
+      const rewardPill = document.getElementById('view-reward-pill');
+      if (collectedCount === totalCount) rewardPill.classList.remove('hidden');
+      else rewardPill.classList.add('hidden');
+
+      const grid = document.getElementById('stamps-grid');
+      grid.innerHTML = '';
+
+      STATIONS.forEach(station => {
+        const stampRecord = passportState.stamps[station.id];
+        const isUnlocked = Boolean(stampRecord);
+        const isJustStamped = passportState.newlyStampedId === station.id;
+
+        let formattedTime = '';
+        if (isUnlocked) {
+          const dt = new Date(stampRecord.stampedAt);
+          formattedTime = dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+
+        const slotCard = document.createElement('button');
+        slotCard.type = 'button';
+        slotCard.onclick = () => {
+          if (!isUnlocked) openCheckinModal(station.id);
+          else showToast(`${station.name} stamped at ${formattedTime}`, 'info');
+        };
+
+        slotCard.className = `group relative rounded-2xl p-3 flex flex-col items-center justify-between text-center transition border ${
+          isUnlocked
+            ? 'bg-white/75 border-amber-900/15 shadow-sm'
+            : 'bg-amber-950/[0.03] border-dashed border-amber-900/20 hover:bg-amber-950/[0.06]'
+        }`;
+
+        const rotStyle = isUnlocked ? `--stamp-rot: ${station.rotation}deg; transform: rotate(${station.rotation}deg);` : '';
+        const animClass = isJustStamped ? 'animate-stamp-press' : '';
+
+        slotCard.innerHTML = `
+          <div class="w-full flex items-center justify-between text-[10px] font-mono text-amber-950/50 mb-1">
+            <span>#0${station.id}</span>
+            <span>${isUnlocked ? 'VERIFIED' : 'LOCKED'}</span>
+          </div>
+          <div class="my-1 ${isUnlocked ? 'ink-stamp' : 'opacity-70 group-hover:opacity-95 transition'} ${animClass}" style="${rotStyle}">
+            ${renderStampSVG(station, isUnlocked, formattedTime)}
+          </div>
+          <div class="mt-1.5 w-full">
+            <div class="font-display font-bold text-xs sm:text-sm leading-tight ${isUnlocked ? 'text-passport-navy' : 'text-slate-500'}">${station.name}</div>
+            <div class="text-[10px] text-slate-500 truncate">${isUnlocked ? `Stamped • ${formattedTime}` : station.subtitle}</div>
+          </div>`;
+
+        grid.appendChild(slotCard);
+      });
+
+      passportState.newlyStampedId = null;
+    }
+
+    /** 7. RENDER ORGANIZER QR CARDS */
+    function renderOrganizerView() {
+      const container = document.getElementById('qr-print-area');
+      container.innerHTML = '';
+
+      const baseUrl = window.location.origin + window.location.pathname;
+      if (window.location.protocol === 'file:') {
+        document.getElementById('local-file-warning').classList.remove('hidden');
+      }
+
+      STATIONS.forEach(station => {
+        const checkinUrl = `${baseUrl}?station=${station.id}&code=${station.code}`;
+        const isCollected = Boolean(passportState.stamps[station.id]);
+
+        const card = document.createElement('div');
+        card.className = 'bg-white rounded-2xl p-4 border border-amber-900/15 shadow-xs flex items-center gap-4';
+
+        const qrBoxId = `qr-code-box-${station.id}`;
+
+        card.innerHTML = `
+          <div id="${qrBoxId}" class="w-24 h-24 shrink-0 bg-white p-1.5 rounded-xl border border-slate-200 flex items-center justify-center"></div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2">
+              <span class="inline-block w-2.5 h-2.5 rounded-full" style="background-color: ${station.color}"></span>
+              <h3 class="font-display font-bold text-base text-passport-navy truncate">${station.id}. ${station.name}</h3>
+            </div>
+            <p class="text-xs text-slate-500">${station.subtitle}</p>
+            <div class="mt-2 flex flex-wrap items-center gap-2">
+              <span class="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 font-mono text-xs font-bold text-slate-800">PIN: ${station.code}</span>
+              <button type="button" onclick="unlockStation(${station.id}, false)"
+                class="no-print text-xs font-semibold px-2.5 py-1 rounded-lg transition ${
+                  isCollected
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    : 'bg-passport-navy text-white hover:bg-passport-royal'
+                }">
+                ${isCollected ? '✓ Stamped' : 'Simulate Scan'}
+              </button>
+            </div>
+            <div class="mt-1.5 flex items-center gap-1.5 no-print">
+              <input type="text" readonly value="${checkinUrl}" class="w-full text-[10px] font-mono text-slate-500 bg-slate-50 border border-slate-200 rounded px-2 py-1 truncate" />
+              <button type="button" onclick="copyText('${checkinUrl}')" class="shrink-0 text-[10px] font-semibold bg-slate-200 hover:bg-slate-300 text-slate-700 px-2 py-1 rounded">Copy</button>
+            </div>
+          </div>`;
+
+        container.appendChild(card);
+
+        try {
+          new QRCode(document.getElementById(qrBoxId), {
+            text: checkinUrl,
+            width: 82,
+            height: 82,
+            colorDark: '#1E2A4A',
+            colorLight: '#FFFFFF',
+            correctLevel: QRCode.CorrectLevel.M
+          });
+        } catch (e) {
+          document.getElementById(qrBoxId).innerHTML = `<span class="text-[10px] font-mono text-center text-slate-400">QR Ready</span>`;
+        }
+      });
+    }
+
+    /** 8. VIEW NAVIGATION & MODALS */
+    function switchView(viewName) {
+      const passportView = document.getElementById('view-passport');
+      const organizerView = document.getElementById('view-organizer');
+      const tabPassport = document.getElementById('tab-passport');
+      const tabOrganizer = document.getElementById('tab-organizer');
+
+      if (viewName === 'organizer') {
+        passportView.classList.add('hidden');
+        organizerView.classList.remove('hidden');
+        organizerView.classList.add('flex');
+        tabOrganizer.className = 'px-3 py-1.5 rounded-lg bg-passport-gold text-passport-navy shadow-sm transition';
+        tabPassport.className = 'px-3 py-1.5 rounded-lg text-amber-100/80 hover:text-white transition';
+        renderOrganizerView();
+      } else {
+        organizerView.classList.add('hidden');
+        organizerView.classList.remove('flex');
+        passportView.classList.remove('hidden');
+        tabPassport.className = 'px-3 py-1.5 rounded-lg bg-passport-gold text-passport-navy shadow-sm transition';
+        tabOrganizer.className = 'px-3 py-1.5 rounded-lg text-amber-100/80 hover:text-white transition';
+        renderPassport();
+      }
+    }
+
+    function openCheckinModal(preselectStationId = null) {
+      const select = document.getElementById('station-select');
+      select.innerHTML = STATIONS.map(s => {
+        const done = passportState.stamps[s.id] ? ' (Already Stamped)' : '';
+        return `<option value="${s.id}">#${s.id} - ${s.name}${done}</option>`;
+      }).join('');
+
+      if (preselectStationId) {
+        select.value = String(preselectStationId);
+      } else {
+        const nextUncollected = STATIONS.find(s => !passportState.stamps[s.id]);
+        if (nextUncollected) select.value = String(nextUncollected.id);
+      }
+
+      document.getElementById('station-pin-input').value = '';
+      document.getElementById('checkin-error-msg').classList.add('hidden');
+      document.getElementById('modal-checkin').classList.remove('hidden');
+      setTimeout(() => document.getElementById('station-pin-input').focus(), 100);
+    }
+
+    function closeCheckinModal() {
+      document.getElementById('modal-checkin').classList.add('hidden');
+    }
+
+    function handleManualCheckin(event) {
+      event.preventDefault();
+      const stationId = parseInt(document.getElementById('station-select').value, 10);
+      const enteredPin = document.getElementById('station-pin-input').value.trim();
+      const errorBox = document.getElementById('checkin-error-msg');
+
+      const station = STATIONS.find(s => s.id === stationId);
+      if (!station) return;
+
+      if (enteredPin !== station.code) {
+        errorBox.textContent = `Incorrect PIN for ${station.name}. Check the booth sign (or Organizer QRs tab).`;
+        errorBox.classList.remove('hidden');
+        return;
+      }
+
+      closeCheckinModal();
+      unlockStation(station.id, false);
+    }
+
+    function openRewardModal() {
+      document.getElementById('reward-holder-name').textContent = passportState.holderName || 'Explorer';
+      document.getElementById('redemption-code').textContent = passportState.rewardCode;
+      document.getElementById('modal-reward').classList.remove('hidden');
+    }
+    function closeRewardModal() { document.getElementById('modal-reward').classList.add('hidden'); }
+    function openResetConfirm() { document.getElementById('modal-reset').classList.remove('hidden'); }
+    function closeResetConfirm() { document.getElementById('modal-reset').classList.add('hidden'); }
+
+    function confirmResetPassport() {
+      passportState.stamps = {};
+      passportState.newlyStampedId = null;
+      saveState();
+      closeResetConfirm();
+      renderPassport();
+      showToast('Passport stamps cleared.', 'info');
+    }
+
+    /** 9. UTILITIES */
+    function showToast(message, type = 'info') {
+      const container = document.getElementById('toast-container');
+      const toast = document.createElement('div');
+      const styles = {
+        success: 'bg-emerald-600 text-white border-emerald-400',
+        error: 'bg-rose-600 text-white border-rose-400',
+        info: 'bg-passport-navy text-white border-passport-gold/40'
+      };
+      toast.className = `${styles[type] || styles.info} border px-4 py-3 rounded-2xl shadow-xl text-xs sm:text-sm font-semibold text-center transition-all duration-300 transform translate-y-0 opacity-100`;
+      toast.textContent = message;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.classList.add('opacity-0', '-translate-y-2');
+        setTimeout(() => toast.remove(), 300);
+      }, 2800);
+    }
+
+    function copyText(text) {
+      const tempInput = document.createElement('input');
+      tempInput.value = text;
+      document.body.appendChild(tempInput);
+      tempInput.select();
+      document.execCommand('copy');
+      document.body.removeChild(tempInput);
+      showToast('Check-in link copied to clipboard!', 'success');
+    }
+
+    function triggerMiniConfetti(colorHex) {
+      if (typeof confetti !== 'function') return;
+      confetti({ particleCount: 35, spread: 55, origin: { y: 0.65 }, colors: [colorHex, '#F5C451', '#FFFFFF'] });
+    }
+
+    function triggerCompletionConfetti() {
+      if (typeof confetti !== 'function') return;
+      confetti({ particleCount: 90, spread: 80, origin: { y: 0.55 }, colors: ['#F5C451', '#10B981', '#3B82F6', '#F43F5E'] });
+    }
+
+    /** 10. BOOTSTRAP ON LOAD */
+    window.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('google-signin-btn').addEventListener('click', () => {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        auth.signInWithPopup(provider).catch(err => {
+          console.error(err);
+          showToast('Sign-in failed or was cancelled.', 'error');
+        });
+      });
+
+      auth.onAuthStateChanged(async (user) => {
+        currentUser = user;
+        const overlay = document.getElementById('login-overlay');
+        if (!user) {
+          overlay.classList.remove('hidden');
+          return;
+        }
+        overlay.classList.add('hidden');
+        await loadState();
+        renderPassport();
+        processUrlCheckIn();
+      });
+    });
+  </script>
+</body>
+</html>
